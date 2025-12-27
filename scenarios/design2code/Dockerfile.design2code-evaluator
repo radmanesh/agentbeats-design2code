@@ -27,7 +27,7 @@ RUN \
     uv pip install "git+https://github.com/openai/CLIP.git"
 
 # Install Playwright browsers
-RUN playwright install chromium
+RUN uv run playwright install chromium
 
 COPY scenarios scenarios
 COPY assets assets
