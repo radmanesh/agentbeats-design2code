@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "agentbeats-tutorial"
-version = "0.1.0"
-description = "Agentbeats Tutorial"
+name = "agentbeats-design2code"
+version = "0.1.2"
+description = "Agentbeats Design2Code Agent"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -17,6 +17,18 @@ dependencies = [
     "pydantic>=2.11.9",
     "python-dotenv>=1.1.1",
     "uvicorn>=0.35.0",
+    "datasets>=2.0.0",
+    "pillow>=10.0.0",
+    "opencv-python>=4.8.0",
+    "numpy>=1.24.0",
+    "beautifulsoup4>=4.12.0",
+    "colormath>=3.0.0",
+    "scipy>=1.11.0",
+    "scikit-learn>=1.3.0",
+    "playwright>=1.40.0",
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "clip @ git+https://github.com/openai/CLIP.git",
 ]
 
 [project.scripts]
@@ -27,6 +39,9 @@ package = true
 dev-dependencies = [
     "mypy>=1.18.1",
 ]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agentbeats"]

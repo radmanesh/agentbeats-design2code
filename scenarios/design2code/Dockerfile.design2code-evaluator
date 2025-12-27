@@ -1,0 +1,37 @@
+FROM ghcr.io/astral-sh/uv:python3.12-trixie
+
+RUN adduser agentbeats
+USER agentbeats
+RUN mkdir -p /home/agentbeats/.cache/uv
+WORKDIR /home/agentbeats/tutorial
+
+COPY pyproject.toml uv.lock README.md ./
+COPY src src
+
+RUN \
+    --mount=type=cache,target=/home/agentbeats/.cache/uv,uid=1000 \
+    uv sync --locked
+
+# Install additional dependencies for Design2Code evaluation
+USER root
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+USER agentbeats
+
+RUN \
+    --mount=type=cache,target=/home/agentbeats/.cache/uv,uid=1000 \
+    uv pip install datasets pillow opencv-python beautifulsoup4 colormath scipy scikit-learn playwright torch torchvision
+
+# Install CLIP from GitHub (not on PyPI)
+RUN \
+    --mount=type=cache,target=/home/agentbeats/.cache/uv,uid=1000 \
+    uv pip install "git+https://github.com/openai/CLIP.git"
+
+# Install Playwright browsers
+RUN playwright install chromium
+
+COPY scenarios scenarios
+COPY assets assets
+
+ENTRYPOINT ["uv", "run", "scenarios/design2code/design2code_evaluator.py"]
+CMD ["--host", "0.0.0.0"]
+EXPOSE 9009
