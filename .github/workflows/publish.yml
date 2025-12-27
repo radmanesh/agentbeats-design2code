@@ -19,7 +19,7 @@ jobs:
           # - name: adk-debate-judge
             # dockerfile: scenarios/debate/Dockerfile.adk-debate-judge
           # - name: debate-judge
-            dockerfile: scenarios/debate/Dockerfile.debate-judge
+            # dockerfile: scenarios/debate/Dockerfile.debate-judge
           # - name: debater
             # dockerfile: scenarios/debate/Dockerfile.debater
           - name: design2code-agent
