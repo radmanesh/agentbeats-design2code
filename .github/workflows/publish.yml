@@ -16,16 +16,20 @@ jobs:
       matrix:
         include:
           # Update this to build your own agent images.
-          - name: adk-debate-judge
-            dockerfile: scenarios/debate/Dockerfile.adk-debate-judge
-          - name: debate-judge
+          # - name: adk-debate-judge
+            # dockerfile: scenarios/debate/Dockerfile.adk-debate-judge
+          # - name: debate-judge
             dockerfile: scenarios/debate/Dockerfile.debate-judge
-          - name: debater
-            dockerfile: scenarios/debate/Dockerfile.debater
-          - name: tau2-agent
-            dockerfile: scenarios/tau2/Dockerfile.tau2-agent
-          - name: tau2-evaluator
-            dockerfile: scenarios/tau2/Dockerfile.tau2-evaluator
+          # - name: debater
+            # dockerfile: scenarios/debate/Dockerfile.debater
+          - name: design2code-agent
+            dockerfile: scenarios/design2code/Dockerfile.design2code-agent
+          - name: design2code-evaluator
+            dockerfile: scenarios/design2code/Dockerfile.design2code-evaluator
+          # - name: tau2-agent
+          #   dockerfile: scenarios/tau2/Dockerfile.tau2-agent
+          # - name: tau2-evaluator
+          #   dockerfile: scenarios/tau2/Dockerfile.tau2-evaluator
 
     # These permissions are required for the workflow to:
     # - Read repository contents (checkout code)
