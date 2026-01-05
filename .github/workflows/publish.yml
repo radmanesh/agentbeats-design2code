@@ -90,7 +90,6 @@ jobs:
           # Explicitly build for linux/amd64 (GitHub Actions default)
           platforms: linux/amd64
           cache-from: type=gha
-          cache-to: type=gha,mode=max
 
       - name: Output image digest
         if: github.event_name != 'pull_request'
