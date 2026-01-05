@@ -14,10 +14,7 @@ RUN \
 
 # Install additional dependencies for Design2Code evaluation
 USER root
-RUN apt-get update && apt-get install -y \
-    git \
-    libglib2.0-0 \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 USER agentbeats
 
 RUN \
@@ -29,18 +26,8 @@ RUN \
     --mount=type=cache,target=/home/agentbeats/.cache/uv,uid=1000 \
     uv pip install "git+https://github.com/openai/CLIP.git"
 
-# Clean up to free space before installing Playwright browsers
-USER root
-RUN apt-get clean && \
-    rm -rf /tmp/* /var/tmp/* && \
-    find /usr/local -name "*.pyc" -delete && \
-    find /usr/local -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
-USER agentbeats
-
-# Install Playwright browsers with cache mount
-RUN \
-    --mount=type=cache,target=/home/agentbeats/.cache/ms-playwright,uid=1000 \
-    uv run playwright install chromium
+# Install Playwright browsers
+RUN uv run playwright install chromium
 
 COPY scenarios scenarios
 COPY assets assets
