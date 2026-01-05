@@ -14,12 +14,16 @@ RUN \
 
 # Install additional dependencies for Design2Code evaluation
 USER root
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y \
+    git \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
 USER agentbeats
 
 RUN \
     --mount=type=cache,target=/home/agentbeats/.cache/uv,uid=1000 \
-    uv pip install datasets pillow opencv-python beautifulsoup4 colormath scipy scikit-learn playwright torch torchvision
+    uv pip install datasets pillow opencv-python-headless beautifulsoup4 colormath scipy scikit-learn playwright torch torchvision
 
 # Install CLIP from GitHub (not on PyPI)
 RUN \
