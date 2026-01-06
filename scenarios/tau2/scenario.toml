@@ -9,4 +9,4 @@ cmd = "python scenarios/tau2/tau2_agent.py --host 127.0.0.1 --port 9019"
 
 [config]
 domain = "airline"
-num_tasks = 3
+num_tasks = 4

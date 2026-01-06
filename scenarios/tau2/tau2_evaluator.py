@@ -1,20 +1,18 @@
 """
 Tau2 Evaluator - Green agent that runs tau-bench evaluation on purple agents.
 
-This agent:
-1. Sets up tau-bench gymnasium environments
-2. Sends task prompts to the purple agent (the agent being tested)
-3. Parses the purple agent's tool-call responses
-4. Steps through the environment and collects metrics
+This agent uses tau2's native Orchestrator for evaluation. The purple agent
+being tested is wrapped in a RemoteA2AAgent that communicates via A2A protocol.
 """
 import argparse
 import asyncio
 import json
 import logging
 import time
-from typing import Any, Optional
+import uuid
+from typing import Any, List, Optional
 
-import gymnasium as gym
+import nest_asyncio
 import uvicorn
 from dotenv import load_dotenv
 
@@ -38,27 +36,39 @@ from agentbeats.green_executor import GreenAgent, GreenExecutor
 from agentbeats.models import EvalRequest
 from agentbeats.tool_provider import ToolProvider
 
-from tau2.data_model.simulation import RewardInfo
+from tau2.agent.base import BaseAgent, ValidAgentInputMessage
+from tau2.agent.llm_agent import LLMAgentState
+from tau2.data_model.message import (
+    AssistantMessage,
+    MultiToolMessage,
+    SystemMessage,
+    ToolCall,
+    ToolMessage,
+    UserMessage,
+)
 from tau2.environment.tool import Tool
-from tau2.gym import TAU_BENCH_ENV_ID, register_gym_agent
+from tau2.orchestrator.orchestrator import Orchestrator
+from tau2.registry import registry
 from tau2.run import get_tasks
+from tau2.user.user_simulator import UserSimulator
+from tau2.evaluator.evaluator import evaluate_simulation, EvaluationType
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("tau2_evaluator")
 
+# Allow nested event loops (needed for sync/async bridge in RemoteA2AAgent)
+nest_asyncio.apply()
+
 RESPOND_ACTION_NAME = "respond"
 
-# Register tau-bench gym environments
-register_gym_agent()
 
-
-def tools_to_str(tools: list[Tool]) -> str:
+def tools_to_str(tools: List[Tool]) -> str:
     """Convert tau-bench tools to JSON schema format."""
     return json.dumps([tool.openai_schema for tool in tools], indent=2)
 
 
-def get_task_ids(domain: str, task_ids: Optional[list[str]], num_tasks: Optional[int] = None) -> list[str]:
-    """Get task IDs for the domain, optionally limited to num_tasks."""
+def get_task_objects(domain: str, task_ids: Optional[List[str]], num_tasks: Optional[int] = None):
+    """Get task objects for the domain, optionally limited to num_tasks."""
     task_set_name = domain
     task_split_name = "base"
     if task_ids is None:
@@ -70,14 +80,197 @@ def get_task_ids(domain: str, task_ids: Optional[list[str]], num_tasks: Optional
             task_ids=task_ids,
         )
 
-    result = [task.id for task in tasks]
     if num_tasks is not None:
-        result = result[:num_tasks]
-    return result
+        tasks = tasks[:num_tasks]
+    return tasks
+
+
+def extract_text_from_message(message: MultiToolMessage | UserMessage | ToolMessage) -> str | None:
+    # Build the message to send to remote agent
+    if isinstance(message, UserMessage):
+        outgoing_text = message.content
+    elif isinstance(message, MultiToolMessage):
+        # Format tool results
+        tool_results = []
+        for tm in message.tool_messages:
+            tool_results.append(f"Tool '{tm.name}' result: {tm.content}")
+        outgoing_text = "\n".join(tool_results)
+    else:
+        outgoing_text = str(message.content) if hasattr(message, 'content') else str(message)
+    return outgoing_text
+
+
+class RemoteA2AAgent(BaseAgent):
+    """
+    An agent that delegates to a remote purple agent via A2A protocol.
+
+    This implements tau2's BaseAgent interface so it can be used with
+    the native Orchestrator, while delegating actual decision-making
+    to the remote agent being tested.
+    """
+
+    def __init__(
+        self,
+        tools: List[Tool],
+        domain_policy: str,
+        tool_provider: ToolProvider,
+        agent_url: str,
+    ):
+        self.tools = tools
+        self.domain_policy = domain_policy
+        self.tool_provider = tool_provider
+        self.agent_url = agent_url
+        self._is_first_message = True
+
+    @property
+    def agent_prompt(self) -> str:
+        """Build the system prompt with policy and tools."""
+        return f"""{self.domain_policy}
+
+Here's a list of tools you can use (you can use at most one tool at a time):
+{tools_to_str(self.tools)}
+
+and 
+
+{json.dumps({
+    "type": "function",
+    "function": {
+        "name": RESPOND_ACTION_NAME,
+        "description": "Respond directly to the user with a message instead of calling a tool.",
+        "parameters": {
+            "properties": {
+                "content": {
+                    "description": "The message content to send to the user.",
+                    "title": "Content",
+                    "type": "string"
+                }
+            },
+            "required": ["content"],
+            "title": "parameters",
+            "type": "object"
+        }
+    }
+}, indent=2)}
+
+
+Please respond in JSON format.
+The JSON should contain:
+- "name": the tool call function name.
+- "arguments": the arguments for the tool call.
+
+You should only use one tool at a time!
+You cannot respond to user and use a tool at the same time!
+
+Examples of responses:
+<json>
+{json.dumps({"name": "find_user_id_by_name_zip", "arguments": {"first_name": "Yusuf", "last_name": "Rossi", "zip_code": "19122"}}, indent=2)}
+</json>
+
+<json>
+{json.dumps({"name": RESPOND_ACTION_NAME, "arguments": {"content": "Hello, how can I help you today?"}}, indent=2)}
+</json>
+"""
+
+    def get_init_state(self, message_history: Optional[list] = None) -> LLMAgentState:
+        """Get the initial state of the agent."""
+        if message_history is None:
+            message_history = []
+        self._is_first_message = True
+        return LLMAgentState(
+            system_messages=[SystemMessage(role="system", content=self.agent_prompt)],
+            messages=message_history,
+        )
+
+    def set_seed(self, seed: int):
+        """Set random seed (no-op for remote agent)."""
+        pass
+
+    def stop(self, last_message=None, state=None):
+        """Stop the agent (no-op for remote agent)."""
+        pass
+
+    def generate_next_message(
+        self, message: ValidAgentInputMessage, state: LLMAgentState
+    ) -> tuple[AssistantMessage, LLMAgentState]:
+        """
+        Generate the next message by delegating to the remote purple agent.
+
+        This method is synchronous (as required by tau2), but internally
+        uses asyncio to communicate with the remote agent.
+        """
+        # Update state with incoming message
+        if isinstance(message, MultiToolMessage):
+            state.messages.extend(message.tool_messages)
+        else:
+            state.messages.append(message)
+
+        outgoing_text = extract_text_from_message(message)
+
+        # If first message, prepend system prompt and all messages.
+        if self._is_first_message:
+            outgoing_text = f"{self.agent_prompt}\n\nNow here are the user messages:\n{'\n'.join([extract_text_from_message(message) for message in state.messages])}"
+
+        # Call remote agent via A2A
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        response = loop.run_until_complete(
+            self.tool_provider.talk_to_agent(
+                message=outgoing_text,
+                url=self.agent_url,
+                new_conversation=self._is_first_message,
+            )
+        )
+        self._is_first_message = False
+
+        # Parse the response
+        assistant_message = self._parse_response(response)
+        state.messages.append(assistant_message)
+
+        return assistant_message, state
+
+    def _parse_response(self, response: str) -> AssistantMessage:
+        """Parse the purple agent's response into an AssistantMessage."""
+        try:
+            action_dict = json.loads(response)
+
+            is_tool_call = action_dict["name"] != RESPOND_ACTION_NAME
+
+            if not is_tool_call:
+                # Response to user
+                return AssistantMessage(
+                    role="assistant",
+                    content=action_dict["arguments"]["content"],
+                    tool_calls=None,
+                )
+            else:
+                # Tool call
+                tool_call = ToolCall(
+                    id=f"call_{uuid.uuid4().hex[:8]}",
+                    name=action_dict["name"],
+                    arguments=action_dict["arguments"],
+                    requestor="assistant",
+                )
+                return AssistantMessage(
+                    role="assistant",
+                    content=None,
+                    tool_calls=[tool_call],
+                )
+        except (json.JSONDecodeError, KeyError) as e:
+            # If parsing fails, treat the response as plain text to user
+            logger.warning(f"Failed to parse agent response as JSON: {e}")
+            return AssistantMessage(
+                role="assistant",
+                content=response,
+                tool_calls=None,
+            )
 
 
 class Tau2Evaluator(GreenAgent):
-    """Green agent that evaluates purple agents using tau-bench."""
+    """Green agent that evaluates purple agents using tau2's native Orchestrator."""
 
     def __init__(self):
         self._required_roles = ["agent"]  # The purple agent being tested
@@ -101,25 +294,26 @@ class Tau2Evaluator(GreenAgent):
         task_ids = req.config.get("task_ids", None)
         num_tasks = req.config.get("num_tasks", None)
         max_steps = req.config.get("max_steps", 200)
-        user_llm = req.config.get("user_llm", "openai/gpt-4o")
+        user_llm = req.config.get("user_llm", "openai/gpt-4.1")
         user_llm_args = req.config.get("user_llm_args", {"temperature": 0.0})
 
         # Get the purple agent URL
         agent_url = str(req.participants["agent"])
 
-        # Get task IDs
-        resolved_task_ids = get_task_ids(domain, task_ids, num_tasks)
-        logger.info(f"Running {len(resolved_task_ids)} tasks for domain {domain}")
+        # Get task objects
+        tasks = get_task_objects(domain, task_ids, num_tasks)
+        logger.info(f"Running {len(tasks)} tasks for domain {domain}")
 
         await updater.update_status(
             TaskState.working,
-            new_agent_text_message(f"Starting evaluation of {len(resolved_task_ids)} tasks in {domain} domain")
+            new_agent_text_message(f"Starting evaluation of {len(tasks)} tasks in {domain} domain")
         )
 
         metrics: dict[str, Any] = {"tasks": {}}
 
         try:
-            for task_id in resolved_task_ids:
+            for task in tasks:
+                task_id = task.id
                 logger.info(f"Running task {task_id}...")
                 await updater.update_status(
                     TaskState.working,
@@ -130,7 +324,7 @@ class Tau2Evaluator(GreenAgent):
                     reward = await self._run_single_task(
                         agent_url=agent_url,
                         domain=domain,
-                        task_id=task_id,
+                        task=task,
                         max_steps=max_steps,
                         user_llm=user_llm,
                         user_llm_args=user_llm_args,
@@ -138,7 +332,7 @@ class Tau2Evaluator(GreenAgent):
                     metrics["tasks"][task_id] = reward
                     logger.info(f"Task {task_id} completed with reward: {reward}")
                 except Exception as e:
-                    logger.error(f"Task {task_id} failed: {e}")
+                    logger.error(f"Task {task_id} failed: {e}", exc_info=True)
                     metrics["tasks"][task_id] = 0.0
 
             time_used = time.time() - start_time
@@ -185,130 +379,66 @@ Task Results:
         self,
         agent_url: str,
         domain: str,
-        task_id: str,
+        task,
         max_steps: int,
         user_llm: str,
         user_llm_args: dict,
     ) -> float:
-        """Run a single tau-bench task and return the reward."""
+        """Run a single tau-bench task using native Orchestrator and return the reward."""
 
-        env = gym.make(
-            TAU_BENCH_ENV_ID,
-            domain=domain,
-            task_id=task_id,
-            max_steps=max_steps,
-            user_llm=user_llm,
-            user_llm_args=user_llm_args,
-            all_messages_as_observation=False,
+        # Get environment from registry
+        env_constructor = registry.get_env_constructor(domain)
+        environment = env_constructor(solo_mode=False)
+
+        # Create the remote agent wrapper
+        agent = RemoteA2AAgent(
+            tools=environment.get_tools(),
+            domain_policy=environment.get_policy(),
+            tool_provider=self._tool_provider,
+            agent_url=agent_url,
         )
 
-        terminated = False
-        observation, info = env.reset()
+        # Create user simulator
+        user = UserSimulator(
+            tools=environment.get_user_tools() if environment.user_tools else None,
+            instructions=str(task.user_scenario),
+            llm=user_llm,
+            llm_args=user_llm_args,
+        )
 
-        # Build the initial task description for the purple agent
-        task_description = self._build_task_prompt(info, observation)
+        # Create orchestrator
+        orchestrator = Orchestrator(
+            domain=domain,
+            agent=agent,
+            user=user,
+            environment=environment,
+            task=task,
+            max_steps=max_steps,
+            max_errors=10,
+            seed=42,
+            solo_mode=False,
+            validate_communication=False,
+        )
 
-        # Start a new conversation with the purple agent
-        next_message = task_description
-        is_first_message = True
+        # Run the simulation
+        simulation_run = orchestrator.run()
 
-        while not terminated:
-            logger.debug(f"Sending to purple agent: {next_message[:200]}...")
+        logger.info(f"Task {task.id} terminated: {simulation_run.termination_reason}")
+        logger.debug(f"Task {task.id} messages: {len(simulation_run.messages)}")
 
-            # Send message to purple agent
-            response = await self._tool_provider.talk_to_agent(
-                message=next_message,
-                url=agent_url,
-                new_conversation=is_first_message,
+        # Evaluate the simulation
+        try:
+            reward_info = evaluate_simulation(
+                simulation=simulation_run,
+                task=task,
+                evaluation_type=EvaluationType.ACTION,
+                solo_mode=False,
+                domain=domain,
             )
-            is_first_message = False
-
-            logger.debug(f"Purple agent response: {response[:200]}...")
-
-            # Parse the purple agent's action
-            try:
-                action = self._parse_agent_response(response)
-            except Exception as e:
-                logger.error(f"Failed to parse agent response: {e}")
-                # When parsing fails, respond with error as plain text (not a tool call)
-                action = "I encountered an error processing the request."
-
-            # Step the environment with either a JSON string (tool call) or plain text (user response)
-            observation, reward, terminated, truncated, info = env.step(action)
-            logger.debug(f"Environment step: reward={reward}, terminated={terminated}")
-
-            if terminated:
-                break
-
-            next_message = observation
-
-        # Extract final reward
-        if info.get("reward_info"):
-            reward_info = RewardInfo.model_validate_json(info["reward_info"])
             return reward_info.reward
-        return float(reward)
-
-    def _build_task_prompt(self, info: dict, observation: str) -> str:
-        """Build the initial task prompt for the purple agent."""
-        return f"""
-{info["policy"]}
-
-Here's a list of tools you can use (you can use at most one tool at a time):
-{tools_to_str(info["tools"])}
-
-Please respond in JSON format. Wrap the JSON with <json>...</json> tags.
-The JSON should contain:
-- "name": the tool call function name, or "{RESPOND_ACTION_NAME}" if you want to respond directly.
-- "arguments": the arguments for the tool call, or {{"content": "your message here"}} if you want to respond directly.
-
-You should only use one tool at a time!
-You cannot respond to user and use a tool at the same time!
-
-Examples of responses:
-<json>
-{json.dumps({"name": "find_user_id_by_name_zip", "arguments": {"first_name": "Yusuf", "last_name": "Rossi", "zip_code": "19122"}}, indent=2)}
-</json>
-
-<json>
-{json.dumps({"name": RESPOND_ACTION_NAME, "arguments": {"content": "Hello, how can I help you today?"}}, indent=2)}
-</json>
-
-Now here is the user message:
-{observation}
-"""
-
-    def _parse_agent_response(self, response: str) -> str:
-        """Parse the purple agent's response to extract the action."""
-        import re
-
-        json_str = None
-
-        # Try to extract JSON from <json>...</json> tags
-        match = re.search(r'<json>\s*(.*?)\s*</json>', response, re.DOTALL)
-        if match:
-            json_str = match.group(1)
-        else:
-            # Try to extract JSON from markdown code blocks ```json ... ```
-            match = re.search(r'```json\s*(.*?)\s*```', response, re.DOTALL)
-            if match:
-                json_str = match.group(1)
-            else:
-                # Try to extract from generic code blocks ``` ... ```
-                match = re.search(r'```\s*(.*?)\s*```', response, re.DOTALL)
-                if match:
-                    json_str = match.group(1)
-
-        if json_str:
-            action_dict = json.loads(json_str)
-        else:
-            # Try to parse the entire response as JSON
-            action_dict = json.loads(response)
-
-        is_tool_call = action_dict["name"] != RESPOND_ACTION_NAME
-        if not is_tool_call:
-            return action_dict["arguments"]["content"]
-        else:
-            return json.dumps(action_dict)
+        except Exception as e:
+            logger.error(f"Evaluation failed for task {task.id}: {e}")
+            return 0.0
 
 
 def tau2_evaluator_agent_card(name: str, url: str) -> AgentCard:

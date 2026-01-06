@@ -4,10 +4,8 @@ Tau2 Agent - Purple agent that solves tau-bench tasks.
 This is the agent being tested. It:
 1. Receives task descriptions with available tools from the green agent
 2. Decides which tool to call or how to respond
-3. Returns responses in the expected JSON format wrapped in <json>...</json> tags
 """
 import argparse
-import os
 import uvicorn
 from dotenv import load_dotenv
 
@@ -45,38 +43,14 @@ def prepare_agent_card(url: str) -> AgentCard:
     )
 
 
-SYSTEM_PROMPT = """You are a helpful customer service agent being evaluated on your ability to solve tasks.
-
-You will receive:
-1. A policy describing your role and guidelines
-2. A list of available tools you can use
-3. User messages that you need to respond to
-
-CRITICAL: You MUST respond in the exact JSON format specified, wrapped in <json>...</json> tags.
-
-For tool calls, respond with:
-<json>
-{"name": "tool_name", "arguments": {"arg1": "value1", ...}}
-</json>
-
-To respond directly to the user, use:
-<json>
-{"name": "respond", "arguments": {"content": "Your message here"}}
-</json>
-
-Rules:
-- Only use one tool at a time
-- You cannot respond to the user AND use a tool in the same message
-- Follow the policy guidelines provided
-- Be helpful and accurate
-- ALWAYS wrap your response in <json>...</json> tags
-"""
+SYSTEM_PROMPT = """You are a helpful customer service agent. Follow the policy and tool instructions provided in each message."""
 
 
 class Tau2AgentExecutor(AgentExecutor):
     """Executor for the tau2 purple agent."""
 
-    def __init__(self):
+    def __init__(self, model: str):
+        self.model = model
         self.ctx_id_to_messages: dict[str, list[dict]] = {}
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
@@ -96,8 +70,9 @@ class Tau2AgentExecutor(AgentExecutor):
         try:
             response = completion(
                 messages=messages,
-                model="openai/gpt-4o",
+                model=self.model,
                 temperature=0.0,
+                response_format={ "type": "json_object" },
             )
             assistant_content = response.choices[0].message.content
             logger.info(f"LLM response: {assistant_content[:200]}...")
@@ -122,13 +97,14 @@ def main():
     parser.add_argument("--host", type=str, default="127.0.0.1", help="Host to bind the server")
     parser.add_argument("--port", type=int, default=9019, help="Port to bind the server")
     parser.add_argument("--card-url", type=str, help="External URL for the agent card")
+    parser.add_argument("--agent-llm", type=str, default="openai/gpt-4.1", help="LLM model to use")
     args = parser.parse_args()
 
     logger.info("Starting tau2 agent...")
     card = prepare_agent_card(args.card_url or f"http://{args.host}:{args.port}/")
 
     request_handler = DefaultRequestHandler(
-        agent_executor=Tau2AgentExecutor(),
+        agent_executor=Tau2AgentExecutor(model=args.agent_llm),
         task_store=InMemoryTaskStore(),
     )
 
