@@ -49,7 +49,7 @@ evaluation_path = Path(__file__).parent / "evaluation"
 sys.path.insert(0, str(Path(__file__).parent))
 from evaluation.visual_evaluator import evaluate_html
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("design2code_evaluator")
 
 
@@ -70,15 +70,13 @@ def extract_html_from_response(response: str) -> str:
     return response.strip()
 
 
-def get_task_ids(
-    dataset_name: str,
+def get_task_objects(
+    dataset: Any,
     task_ids: Optional[list[str | int]],
     num_tasks: Optional[int] = None,
-) -> list[str]:
-    """Get task IDs from the dataset, optionally limited to num_tasks."""
+) -> list[tuple[int, dict]]:
+    """Get task objects (index, item) from the dataset, optionally limited to num_tasks."""
     try:
-        dataset = load_dataset(dataset_name, split="train")
-
         if task_ids is not None:
             # Filter by specific task IDs
             # Convert task_ids to indices if they're integers
@@ -92,19 +90,19 @@ def get_task_ids(
                 # If no matches, use task_ids as indices
                 indices = [int(tid) if isinstance(tid, str) and tid.isdigit() else int(tid) for tid in task_ids]
 
-            result = [str(i) for i in indices]
+            result = [(i, dataset[i]) for i in indices]
         else:
             # Use all tasks, limited by num_tasks
             total = len(dataset)
             limit = num_tasks if num_tasks is not None else total
-            result = [str(i) for i in range(min(limit, total))]
+            result = [(i, dataset[i]) for i in range(min(limit, total))]
 
         return result
     except Exception as e:
-        logger.error(f"Error loading dataset: {e}")
-        # Fallback: return default task IDs if dataset loading fails
+        logger.error(f"Error getting task objects: {e}")
+        # Fallback: return default task objects if dataset access fails
         limit = num_tasks if num_tasks is not None else 3
-        return [str(i) for i in range(limit)]
+        return [(i, dataset[i]) for i in range(min(limit, len(dataset)))]
 
 
 class Design2CodeEvaluator(GreenAgent):
@@ -144,20 +142,19 @@ class Design2CodeEvaluator(GreenAgent):
             # Raise exception to let GreenExecutor handle error reporting
             raise RuntimeError(f"Failed to load dataset: {e}") from e
 
-        # Get task IDs
-        resolved_task_ids = get_task_ids(dataset_name, task_ids, num_tasks)
-        logger.info(f"Running {len(resolved_task_ids)} tasks from {dataset_name}")
+        # Get task objects
+        tasks = get_task_objects(dataset, task_ids, num_tasks)
+        logger.info(f"Running {len(tasks)} tasks from {dataset_name}")
 
         await updater.update_status(
             TaskState.working,
-            new_agent_text_message(f"Starting evaluation of {len(resolved_task_ids)} tasks from {dataset_name}")
+            new_agent_text_message(f"Starting evaluation of {len(tasks)} tasks from {dataset_name}")
         )
 
         metrics: dict[str, Any] = {"tasks": {}}
 
         try:
-            for task_idx_str in resolved_task_ids:
-                task_idx = int(task_idx_str)
+            for task_idx, task_data in tasks:
                 logger.info(f"Running task {task_idx}...")
                 await updater.update_status(
                     TaskState.working,
@@ -167,14 +164,14 @@ class Design2CodeEvaluator(GreenAgent):
                 try:
                     reward = await self._run_single_task(
                         agent_url=agent_url,
-                        dataset=dataset,
+                        task_data=task_data,
                         task_idx=task_idx,
                     )
-                    metrics["tasks"][task_idx_str] = reward
+                    metrics["tasks"][str(task_idx)] = reward
                     logger.info(f"Task {task_idx} completed with reward: {reward}")
                 except Exception as e:
-                    logger.error(f"Task {task_idx} failed: {e}")
-                    metrics["tasks"][task_idx_str] = 0.0
+                    logger.error(f"Task {task_idx} failed: {e}", exc_info=True)
+                    metrics["tasks"][str(task_idx)] = 0.0
 
             time_used = time.time() - start_time
             total_reward = sum(metrics["tasks"].values())
@@ -202,7 +199,7 @@ class Design2CodeEvaluator(GreenAgent):
 Dataset: {dataset_name}
 Tasks: {num_completed}
 Average Score: {avg_reward:.3f}
-Pass Rate (>0.5): {pass_rate:.1f}%
+Pass Rate: {pass_rate:.1f}% ({int(total_reward)}/{num_completed})
 Time: {time_used:.1f}s
 
 Task Results:
@@ -222,14 +219,11 @@ Task Results:
     async def _run_single_task(
         self,
         agent_url: str,
-        dataset: Any,
+        task_data: dict,
         task_idx: int,
     ) -> float:
         """Run a single Design2Code task and return the reward."""
         try:
-            # Get task data from dataset
-            task_data = dataset[task_idx]
-
             # Log dataset structure for debugging
             if task_idx == 0:  # Only log for first task to avoid spam
                 if hasattr(task_data, 'keys'):
@@ -309,7 +303,7 @@ Task Results:
             return float(score)
 
         except Exception as e:
-            logger.error(f"Error running task {task_idx}: {e}")
+            logger.error(f"Error running task {task_idx}: {e}", exc_info=True)
             raise
 
 

@@ -784,10 +784,5 @@ async def evaluate_html(generated_html: str, reference_html: str, reference_imag
 
     except Exception as e:
         logger.error(f"Evaluation error: {e}", exc_info=True)
-        # Fall back to simple HTML similarity
-        gen_tags = set(re.findall(r'<(\w+)', generated_html))
-        ref_tags = set(re.findall(r'<(\w+)', reference_html))
-        if gen_tags and ref_tags:
-            overlap = len(gen_tags.intersection(ref_tags)) / len(gen_tags.union(ref_tags))
-            return 0.5 + overlap * 0.3
-        return 0.5
+        # Return 0.0 for failed evaluations instead of fallback score
+        return 0.0

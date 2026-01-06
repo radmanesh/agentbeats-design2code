@@ -60,7 +60,8 @@ Respond with the content of the HTML+CSS file wrapped in <html_code>...</html_co
 class Design2CodeAgentExecutor(AgentExecutor):
     """Executor for the design2code agent."""
 
-    def __init__(self):
+    def __init__(self, model: str):
+        self.model = model
         self.ctx_id_to_messages: dict[str, list[dict]] = {}
 
     def _extract_screenshot(self, user_input: str) -> tuple[str, str | None]:
@@ -139,7 +140,7 @@ class Design2CodeAgentExecutor(AgentExecutor):
         try:
             response = completion(
                 messages=messages,
-                model="openai/gpt-4o",
+                model=self.model,
                 temperature=0.0,
             )
             assistant_content = response.choices[0].message.content
@@ -177,13 +178,14 @@ def main():
     parser.add_argument("--host", type=str, default="127.0.0.1", help="Host to bind the server")
     parser.add_argument("--port", type=int, default=9019, help="Port to bind the server")
     parser.add_argument("--card-url", type=str, help="External URL for the agent card")
+    parser.add_argument("--agent-llm", type=str, default="openai/gpt-4o", help="LLM model to use")
     args = parser.parse_args()
 
     logger.info("Starting design2code agent...")
     card = prepare_agent_card(args.card_url or f"http://{args.host}:{args.port}/")
 
     request_handler = DefaultRequestHandler(
-        agent_executor=Design2CodeAgentExecutor(),
+        agent_executor=Design2CodeAgentExecutor(model=args.agent_llm),
         task_store=InMemoryTaskStore(),
     )
 
