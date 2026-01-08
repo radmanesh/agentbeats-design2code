@@ -1,37 +1,46 @@
+# AgentBeats Design2Code
+
+A Design2Code evaluation scenario for AgentBeats that evaluates agents' ability to generate HTML code from screenshots.
+
 ## Quickstart
+
 1. Clone the repo
+```bash
+git clone git@github.com:radmanesh/agentbeats-design2code.git
+cd agentbeats-design2code
 ```
-git clone git@github.com:agentbeats/tutorial.git agentbeats-tutorial
-cd agentbeats-tutorial
-```
+
 2. Install dependencies
-```
+```bash
 uv sync
 ```
+
 3. Set environment variables
-```
+```bash
 cp sample.env .env
 ```
-Add your Google API key to the .env file
+Add your API keys to the `.env` file (OpenAI API key for GPT-4o Vision, or other LLM provider keys).
 
-4. Run the [debate example](#example)
+4. Run the Design2Code evaluation
+```bash
+uv run agentbeats-run scenarios/design2code/scenario.toml
 ```
-uv run agentbeats-run scenarios/debate/scenario.toml
-```
+
 This command will:
-- Start the agent servers using the commands specified in scenario.toml
+- Start the agent servers using the commands specified in `scenario.toml`
 - Construct an `assessment_request` message containing the participant's role-endpoint mapping and the assessment config
-- Send the `assessment_request` to the green agent and print streamed responses
+- Send the `assessment_request` to the green agent (evaluator) and print streamed responses
 
-**Note:** Use `--show-logs` to see agent outputs during the assessment, and `--serve-only` to start agents without running the assessment.
+**Note:** Use `--show-logs` to see agent outputs during the assessment (including DEBUG logs), and `--serve-only` to start agents without running the assessment.
 
-To run this example manually, start the agent servers in separate terminals, and then in another terminal run the A2A client on the scenario.toml file to initiate the assessment.
+To run manually, start the agent servers in separate terminals, and then in another terminal run the A2A client on the scenario.toml file to initiate the assessment.
 
 After running, you should see an output similar to this.
 
 ![Sample output](assets/sample_output.png)
 
 ## Project Structure
+
 ```
 src/
 └─ agentbeats/
@@ -42,32 +51,25 @@ src/
    └─ run_scenario.py          # run agents and start assessment
 
 scenarios/
-└─ debate/                     # implementation of the debate example
-   ├─ debate_judge.py          # green agent impl using the official A2A SDK
-   ├─ adk_debate_judge.py      # alternative green agent impl using Google ADK
-   ├─ debate_judge_common.py   # models and utils shared by above impls
-   ├─ debater.py               # debater agent (Google ADK)
-   └─ scenario.toml            # config for the debate example
+└─ design2code/                # Design2Code evaluation scenario
+   ├─ design2code_agent.py     # purple agent that generates HTML from screenshots
+   ├─ design2code_evaluator.py # green agent that evaluates HTML generation
+   ├─ Dockerfile.design2code-agent
+   ├─ Dockerfile.design2code-evaluator
+   ├─ evaluation/
+   │   └─ visual_evaluator.py  # visual evaluation logic (CLIP, block matching, etc.)
+   └─ scenario.toml            # config for the Design2Code evaluation
 ```
 
-# AgentBeats Tutorial
-Welcome to the AgentBeats Tutorial! 🤖🎵
+## About AgentBeats
 
-AgentBeats is an open platform for **standardized and reproducible agent evaluations** and research.
+AgentBeats is an open platform for **standardized and reproducible agent evaluations** and research. This project implements a Design2Code evaluation scenario that tests agents' ability to generate HTML code from visual designs.
 
-This tutorial is designed to help you get started, whether you are:
-- 🔬 **Researcher** → running controlled experiments and publishing reproducible results
-- 🛠️ **Builder** → developing new agents and testing them against benchmarks
-- 📊 **Evaluator** → designing benchmarks, scenarios, or games to measure agent performance
-- ✨ **Enthusiast** → exploring agent behavior, running experiments, and learning by tinkering
+### What This Project Does
 
-By the end, you’ll understand:
-- The core concepts behind AgentBeats - green agents, purple agents, and A2A assessments
-- How to run existing evaluations on the platform via the web UI
-- How to build and test your own agents locally
-- Share your agents and evaluation results with the community
-
-This guide will help you quickly get started with AgentBeats and contribute to a growing ecosystem of open agent benchmarks.
+This evaluation scenario:
+- **Purple Agent (design2code_agent)**: Receives screenshot images and generates HTML code that recreates the visual appearance using GPT-4o Vision
+- **Green Agent (design2code_evaluator)**: Loads the Design2Code dataset from Hugging Face, sends tasks to the purple agent, and evaluates the generated HTML using visual similarity metrics (CLIP, block matching, text similarity, etc.)
 
 ## Core Concepts
 **Green agents** orchestrate and manage evaluations of one or more purple agents by providing an evaluation harness.
@@ -112,38 +114,60 @@ Below are some common patterns to help guide your assessment design.
 #### Reproducibility
 To ensure reproducibility, your agents (including their tools and environments) must join each assessment with a fresh state.
 
-### Example
-To make things concrete, we will use a debate scenario as our toy example:
-- Green agent (`DebateJudge`) orchestrates a debate between two agents by using an A2A client to alternate turns between participants. Each participant's response is forwarded to the caller as a task update. After the orchestration, it applies an LLM-as-Judge technique to evaluate which debater performed better and finally produces an artifact with the results.
-- Two purple agents (`Debater`) participate by presenting arguments for their side of the topic.
+### Design2Code Evaluation
 
-To run this example, we start all three servers and then use an A2A client to send an `assessment_request` to the green agent and observe its outputs.
-The full example code is given in the template repository. Follow the quickstart guide to setup the project and run the example.
+The Design2Code evaluation tests an agent's ability to generate HTML code from screenshots:
+
+- **Purple Agent (`design2code_agent`)**: Receives screenshot images and task instructions. Uses GPT-4o Vision (or other configured LLM) to analyze the visual design and generate HTML code that recreates the appearance. Returns HTML wrapped in `<html_code>...</html_code>` tags.
+
+- **Green Agent (`design2code_evaluator`)**:
+  - Loads the Design2Code dataset from Hugging Face (`SALT-NLP/Design2Code-hf`)
+  - Sends screenshot tasks to the purple agent
+  - Parses the generated HTML from the agent's response
+  - Evaluates the HTML using visual similarity metrics:
+    - CLIP similarity between generated and reference screenshots
+    - Block-level matching (position, color, text similarity)
+    - Overall visual quality assessment
+  - Produces evaluation metrics and artifacts
+
+The evaluation uses the `visual_evaluator` module which:
+- Converts HTML to screenshots using Playwright
+- Extracts visual blocks from HTML
+- Compares generated HTML against reference HTML using multiple metrics
+- Handles HTML preprocessing and truncation of repetitive elements
 
 ### Dockerizing Agent
 
 AgentBeats uses Docker to reproducibly run assessments on GitHub runners. Your agent needs to be packaged as a Docker image and published to the GitHub Container Registry.
 
-**How AgentBeats runs your image**  
+**How AgentBeats runs your image**
 Your image must define an [`ENTRYPOINT`](https://docs.docker.com/reference/dockerfile/#entrypoint) that starts your agent server and accepts the following arguments:
 - `--host`: host address to bind to
 - `--port`: port to listen on
 - `--card-url`: the URL to advertise in the agent card
 
 **Build and publish steps**
-1. Create a Dockerfile for your agent. See example [Dockerfiles](./scenarios/debate).
-2. Build the image
+1. Dockerfiles are provided for both agents:
+   - `Dockerfile.design2code-agent` - for the purple agent
+   - `Dockerfile.design2code-evaluator` - for the green agent (includes Playwright, OpenCV, and other evaluation dependencies)
+
+2. Build the images
 ```bash
-docker build --platform linux/amd64 -t ghcr.io/yourusername/your-agent:v1.0 .
+# Build agent image
+docker build --platform linux/amd64 -f scenarios/design2code/Dockerfile.design2code-agent -t ghcr.io/radmanesh/agentbeats-design2code-design2code-agent:latest .
+
+# Build evaluator image
+docker build --platform linux/amd64 -f scenarios/design2code/Dockerfile.design2code-evaluator -t ghcr.io/radmanesh/agentbeats-design2code-design2code-evaluator:latest .
 ```
 **⚠️ Important**: Always build for `linux/amd64` architecture as that is used by GitHub Actions.
 
 3. Push to GitHub Container Registry
 ```bash
-docker push ghcr.io/yourusername/your-agent:v1.0
+docker push ghcr.io/radmanesh/agentbeats-design2code-design2code-agent:latest
+docker push ghcr.io/radmanesh/agentbeats-design2code-design2code-evaluator:latest
 ```
 
-We recommend setting up a GitHub Actions [workflow](.github/workflows/publish.yml) to automatically build and publish your agent images.
+A GitHub Actions [workflow](.github/workflows/publish.yml) is configured to automatically build and publish the agent images.
 
 ## Best Practices 💡
 
@@ -153,7 +177,7 @@ Developing robust and efficient agents requires more than just writing code. Her
 
 AgentBeats uses a Bring-Your-Own-Key (BYOK) model. This gives you maximum flexibility to use any LLM provider, but also means you are responsible for securing your keys and managing costs.
 
--   **Security**: You provide your API keys directly to the agents running on your own infrastructure. Never expose your keys in client-side code or commit them to public repositories. Use environment variables (like in the tutorial's `.env` file) to manage them securely.
+-   **Security**: You provide your API keys directly to the agents running on your own infrastructure. Never expose your keys in client-side code or commit them to public repositories. Use environment variables (like in the project's `.env` file) to manage them securely.
 
 -   **Cost Control**: If you publish a public agent, it could become popular unexpectedly. To prevent surprise bills, it's crucial to set spending limits and alerts on your API keys or cloud account. For example, if you're only using an API for a single agent on AgentBeats, a limit of $10 with an alert at $5 might be a safe starting point.
 
@@ -195,13 +219,13 @@ The green and purple agents have distinct roles. Adhering to this separation is 
 -   **Green agent**: A lightweight verifier or orchestrator. Its main job is to set up the scenario, provide context to purple agents, and evaluate the final result. It should not perform heavy computation.
 -   **Purple agent**: The workhorse. It performs the core task, which may involve complex computation, running tools, or long-running processes.
 
-Here's an example for a security benchmark:
-1.  The **green agent** defines a task (e.g., "find a vulnerability in this codebase") and sends the repository URL to the purple agent.
-2.  The **purple agent** clones the code, runs its static analysis tools, fuzzers, and other agentic processes. This could take a long time and consume significant resources.
-3.  Once it finds a vulnerability, the **purple agent** sends back a concise report: the steps to reproduce the bug and a proposed patch.
-4.  The **green agent** receives this small payload, runs the reproduction steps, and verifies the result. This final verification step is quick and lightweight.
+In the Design2Code evaluation:
+1.  The **green agent** loads a task from the dataset (screenshot + reference HTML) and sends the screenshot to the purple agent.
+2.  The **purple agent** uses GPT-4o Vision to analyze the screenshot and generate HTML code. This involves LLM API calls which may take time and consume API credits.
+3.  The **purple agent** sends back the generated HTML code.
+4.  The **green agent** receives the HTML, generates screenshots using Playwright, and evaluates visual similarity using CLIP and block matching. While this involves some computation, it's focused on evaluation rather than generation.
 
-This structure keeps communication overhead low and makes the assessment efficient.
+This structure keeps communication overhead low (only sending screenshots and HTML) and makes the assessment efficient.
 
 ### Taking Advantage of Platform Features
 AgentBeats is more than just a runner; it's an observability platform. You can make your agent's "thought process" visible to the community and to evaluators.
@@ -220,11 +244,39 @@ For benchmarks to be fair and meaningful, every assessment run must be independe
 
 Following these principles ensures that your agent's performance is measured based on its capability for the task at hand, not on leftover state from a previous run.
 
-## Next Steps
-Now that you’ve completed the tutorial, you’re ready to take the next step with AgentBeats.
+## Configuration
 
-- 📊 **Develop new assessments** → Build a green agent along with baseline purple agents. Share your GitHub repo with us and we'll help with hosting and onboarding to the platform.
-- 🏆 **Evaluate your agents** → Create and test agents against existing benchmarks to climb the leaderboards.
-- 🌐 **Join the community** → Connect with researchers, builders, and enthusiasts to exchange ideas, share results, and collaborate on new evaluations.
+The evaluation can be configured via the `scenario.toml` file:
 
-The more agents and assessments are shared, the richer and more useful the platform becomes. We’re excited to see what you create!
+```toml
+[config]
+dataset_name = "SALT-NLP/Design2Code-hf"  # Hugging Face dataset
+num_tasks = 3                              # Number of tasks to evaluate
+task_ids = null                            # Optional: specific task IDs to run
+```
+
+You can also configure the agent's LLM model via command-line arguments:
+```bash
+python scenarios/design2code/design2code_agent.py --agent-llm "openai/gpt-4o"
+```
+
+## Development
+
+### Running Locally
+
+To run the evaluation locally with debug logging:
+```bash
+uv run agentbeats-run scenarios/design2code/scenario.toml --show-logs
+```
+
+### Testing Screenshot Generation
+
+The evaluator uses Playwright to generate screenshots from HTML. To verify screenshot generation is working, check the DEBUG logs when running with `--show-logs`. The `visual_evaluator.py` module logs screenshot generation details at DEBUG level.
+
+## Contributing
+
+This project implements a Design2Code evaluation scenario for AgentBeats. Contributions are welcome!
+
+- 🐛 **Report issues** → Open an issue for bugs or feature requests
+- 🔧 **Improve evaluation** → Enhance visual evaluation metrics or add new ones
+- 🚀 **Optimize performance** → Improve HTML processing, screenshot generation, or evaluation speed
