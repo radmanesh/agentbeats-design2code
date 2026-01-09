@@ -29,8 +29,13 @@ RUN \
     --mount=type=cache,target=/home/agentbeats/.cache/uv,uid=1000 \
     uv pip install --no-cache-dir "git+https://github.com/openai/CLIP.git"
 
-RUN uv run playwright install chromium && \
-    uv run playwright install-deps chromium || true
+# Install Playwright browsers
+RUN uv run playwright install chromium
+
+# Install Playwright system dependencies (must run as root)
+USER root
+RUN uv run playwright install-deps chromium
+USER agentbeats
 
 COPY scenarios scenarios
 COPY assets assets
