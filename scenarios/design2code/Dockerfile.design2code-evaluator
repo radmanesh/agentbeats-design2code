@@ -12,33 +12,44 @@ RUN \
     --mount=type=cache,target=/home/agentbeats/.cache/uv,uid=1000 \
     uv sync --locked
 
-# Install additional dependencies for Design2Code evaluation
+# Install system dependencies
 USER root
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y git && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 USER agentbeats
 
+# Install evaluation dependencies - use CPU-only torch to save ~2-3GB
 RUN \
     --mount=type=cache,target=/home/agentbeats/.cache/uv,uid=1000 \
-    uv pip install datasets pillow opencv-python-headless numpy beautifulsoup4 colormath scipy playwright torch torchvision
+    uv pip install --no-cache-dir datasets pillow opencv-python-headless numpy beautifulsoup4 colormath scipy playwright && \
+    uv pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
 # Install CLIP from GitHub (not on PyPI)
 RUN \
     --mount=type=cache,target=/home/agentbeats/.cache/uv,uid=1000 \
-    uv pip install "git+https://github.com/openai/CLIP.git"
+    uv pip install --no-cache-dir "git+https://github.com/openai/CLIP.git"
 
-# Clean up to free space before installing Playwright browsers
+# Clean up pip cache and temporary files immediately after installations
 USER root
 RUN apt-get clean && \
-    rm -rf /tmp/* /var/tmp/* && \
-    rm -rf /var/lib/apt/lists/* && \
+    rm -rf /tmp/* /var/tmp/* /var/lib/apt/lists/* && \
+    rm -rf /root/.cache /home/agentbeats/.cache/pip /home/agentbeats/.cache/uv/pip 2>/dev/null || true && \
     find /usr/local -name "*.pyc" -delete && \
-    find /usr/local -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+    find /usr/local -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true && \
+    find /usr/local -name "*.dist-info" -type d -exec rm -rf {} + 2>/dev/null || true
 USER agentbeats
 
 # Install Playwright browsers with cache mount to reduce disk usage
 RUN \
     --mount=type=cache,target=/home/agentbeats/.cache/ms-playwright,uid=1000 \
-    uv run playwright install chromium
+    uv run playwright install chromium && \
+    uv run playwright install-deps chromium || true
+
+# Final cleanup
+USER root
+RUN rm -rf /tmp/* /var/tmp/* && \
+    find /home/agentbeats/.cache -type f -name "*.whl" -delete 2>/dev/null || true
+USER agentbeats
 
 COPY scenarios scenarios
 COPY assets assets
