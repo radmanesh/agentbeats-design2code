@@ -19,7 +19,7 @@ USER agentbeats
 
 RUN \
     --mount=type=cache,target=/home/agentbeats/.cache/uv,uid=1000 \
-    uv pip install datasets pillow opencv-python-headless beautifulsoup4 colormath scipy scikit-learn playwright torch torchvision
+    uv pip install datasets pillow opencv-python-headless numpy beautifulsoup4 colormath scipy playwright torch torchvision
 
 # Install CLIP from GitHub (not on PyPI)
 RUN \

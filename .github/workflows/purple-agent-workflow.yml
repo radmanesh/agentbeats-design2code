@@ -8,7 +8,7 @@ on:
 
 jobs:
   evaluate:
-    uses: radmanesh/design2code-bench/.github/workflows/runner.yml@main
+    uses: radmanesh/design2code-bench/.github/workflows/run-scenario.yml@main
     with:
       leaderboard_repo: 'radmanesh/design2code-bench'
       scenario_file: 'scenario.toml'
