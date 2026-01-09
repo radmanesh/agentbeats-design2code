@@ -70,6 +70,27 @@ def extract_html_from_response(response: str) -> str:
     return response.strip()
 
 
+def is_refusal_response(response: str) -> bool:
+    """Check if the LLM response is a refusal to assist."""
+    refusal_patterns = [
+        r"i\s+can'?t\s+assist",
+        r"i\s+can'?t\s+help",
+        r"i'?m\s+sorry,\s+i\s+can'?t",
+        r"i\s+can'?t\s+provide",
+        r"i\s+am\s+not\s+able\s+to",
+        r"i\s+don'?t\s+have\s+the\s+ability",
+        r"i\s+can'?t\s+generate",
+        r"unable\s+to\s+assist",
+        r"cannot\s+assist",
+        r"cannot\s+help",
+    ]
+    response_lower = response.lower()
+    for pattern in refusal_patterns:
+        if re.search(pattern, response_lower):
+            return True
+    return False
+
+
 def get_task_objects(
     dataset: Any,
     task_ids: Optional[list[str | int]],
@@ -276,21 +297,48 @@ Task Results:
 </screenshot_base64>
 """
 
-            # Send to white agent (start new conversation for each task)
-            logger.debug(f"Sending task {task_idx} to white agent...")
-            response = await self._tool_provider.talk_to_agent(
-                message=task_prompt,
-                url=agent_url,
-                new_conversation=True,
-            )
+            # Send to white agent with retry logic for refusal responses
+            max_retries = 3
+            retry_delay = 1.0  # seconds
+            response = None
+            generated_html = None
 
-            logger.debug(f"White agent response (first 200 chars): {response[:200]}...")
+            for attempt in range(max_retries):
+                logger.debug(f"Sending task {task_idx} to white agent (attempt {attempt + 1}/{max_retries})...")
+                response = await self._tool_provider.talk_to_agent(
+                    message=task_prompt,
+                    url=agent_url,
+                    new_conversation=(attempt == 0),  # Only start new conversation on first attempt
+                )
 
-            # Extract HTML from response
-            generated_html = extract_html_from_response(response)
+                logger.debug(f"White agent response (first 200 chars): {response[:200]}...")
 
-            if not generated_html:
-                logger.warning(f"Task {task_idx}: No HTML extracted from response")
+                # Check if response is a refusal
+                if is_refusal_response(response):
+                    logger.warning(f"Task {task_idx}: LLM refused to assist (attempt {attempt + 1}/{max_retries})")
+                    if attempt < max_retries - 1:
+                        logger.info(f"Retrying task {task_idx} in {retry_delay}s...")
+                        await asyncio.sleep(retry_delay)
+                        continue
+                    else:
+                        logger.error(f"Task {task_idx}: LLM refused after {max_retries} attempts")
+                        return 0.0
+
+                # Extract HTML from response
+                generated_html = extract_html_from_response(response)
+
+                # If we got HTML content, break out of retry loop
+                if generated_html and len(generated_html.strip()) > 0:
+                    break
+                else:
+                    logger.warning(f"Task {task_idx}: Empty HTML extracted (attempt {attempt + 1}/{max_retries})")
+                    if attempt < max_retries - 1:
+                        logger.info(f"Retrying task {task_idx} in {retry_delay}s...")
+                        await asyncio.sleep(retry_delay)
+                        continue
+
+            if not generated_html or len(generated_html.strip()) == 0:
+                logger.warning(f"Task {task_idx}: No HTML extracted from response after {max_retries} attempts")
                 return 0.0
 
             # Evaluate HTML using visual evaluator
