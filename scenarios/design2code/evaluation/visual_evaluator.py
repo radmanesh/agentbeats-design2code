@@ -7,7 +7,9 @@ instead of file paths.
 import io
 import logging
 import re
+import ssl
 import tempfile
+import urllib.request
 from pathlib import Path
 from typing import Any, Optional
 
@@ -44,20 +46,57 @@ def _get_clip_model():
     if _clip_model is None:
         try:
             import torch
+            logger.debug("Torch imported successfully")
             try:
                 import clip
-            except ImportError:
+                logger.info("CLIP library imported successfully")
+            except ImportError as e:
+                logger.error(f"CLIP library import failed: {e}")
                 logger.warning("CLIP library not installed. Install with: pip install git+https://github.com/openai/CLIP.git")
                 _clip_model = None
                 return None, None, None
 
             _clip_device = "cuda" if torch.cuda.is_available() else "cpu"
-            _clip_model, _clip_preprocess = clip.load("ViT-B/32", device=_clip_device)
+            logger.info(f"Loading CLIP model 'ViT-B/32' on {_clip_device}...")
+
+            # Try to load CLIP model, handling SSL certificate issues
+            try:
+                _clip_model, _clip_preprocess = clip.load("ViT-B/32", device=_clip_device)
+            except (urllib.error.URLError, ssl.SSLError) as ssl_error:
+                if "CERTIFICATE_VERIFY_FAILED" in str(ssl_error) or isinstance(ssl_error, ssl.SSLError):
+                    logger.warning(f"SSL certificate verification failed. Retrying with SSL verification disabled...")
+                    logger.warning("WARNING: SSL verification is disabled for CLIP model download. This is insecure but may be necessary behind corporate proxies.")
+
+                    # Create unverified SSL context
+                    ssl_context = ssl.create_default_context()
+                    ssl_context.check_hostname = False
+                    ssl_context.verify_mode = ssl.CERT_NONE
+
+                    # Monkey-patch urllib to use unverified context temporarily
+                    original_urlopen = urllib.request.urlopen
+                    def urlopen_with_ssl_bypass(*args, **kwargs):
+                        if 'context' not in kwargs:
+                            kwargs['context'] = ssl_context
+                        return original_urlopen(*args, **kwargs)
+
+                    urllib.request.urlopen = urlopen_with_ssl_bypass
+                    try:
+                        _clip_model, _clip_preprocess = clip.load("ViT-B/32", device=_clip_device)
+                        logger.info("CLIP model loaded successfully with SSL verification disabled")
+                    finally:
+                        # Restore original urlopen
+                        urllib.request.urlopen = original_urlopen
+                else:
+                    raise
+
             _clip_model.eval()  # Set to evaluation mode
-            logger.info(f"CLIP model loaded on {_clip_device}")
+            logger.info(f"CLIP model loaded successfully on {_clip_device}")
         except Exception as e:
+            logger.error(f"CLIP model loading failed: {e}", exc_info=True)
             logger.warning(f"CLIP not available: {e}. CLIP similarity will return 0.0")
             _clip_model = None
+    else:
+        logger.debug(f"CLIP model already loaded on {_clip_device}")
     return _clip_model, _clip_preprocess, _clip_device
 
 
@@ -607,28 +646,38 @@ def calculate_clip_similarity_with_blocks(image1: Image.Image, image2: Image.Ima
     """Calculate CLIP similarity with blocks."""
     model, preprocess, device = _get_clip_model()
     if model is None:
+        logger.warning("CLIP model is None, returning 0.0 for similarity")
         return 0.0
 
     try:
         import torch
 
+        logger.debug(f"Calculating CLIP similarity: image1 size={image1.size}, image2 size={image2.size}, blocks1={len(blocks1)}, blocks2={len(blocks2)}")
+
         image1_processed = rescale_and_mask(image1, blocks1)
         image2_processed = rescale_and_mask(image2, blocks2)
 
+        logger.debug(f"Processed images: image1 size={image1_processed.size}, image2 size={image2_processed.size}")
+
         image1_tensor = preprocess(image1_processed).unsqueeze(0).to(device)
         image2_tensor = preprocess(image2_processed).unsqueeze(0).to(device)
+
+        logger.debug(f"Image tensors created: image1 shape={image1_tensor.shape}, image2 shape={image2_tensor.shape}, device={device}")
 
         with torch.no_grad():
             image_features1 = model.encode_image(image1_tensor)
             image_features2 = model.encode_image(image2_tensor)
 
+        logger.debug(f"Image features extracted: features1 shape={image_features1.shape}, features2 shape={image_features2.shape}")
+
         image_features1 /= image_features1.norm(dim=-1, keepdim=True)
         image_features2 /= image_features2.norm(dim=-1, keepdim=True)
 
         similarity = (image_features1 @ image_features2.T).item()
+        logger.info(f"CLIP similarity calculated: {similarity:.4f}")
         return similarity
     except Exception as e:
-        logger.warning(f"CLIP similarity calculation failed: {e}")
+        logger.error(f"CLIP similarity calculation failed: {e}", exc_info=True)
         return 0.0
 
 
@@ -666,7 +715,7 @@ def pre_process_html(html_content: str) -> str:
     return soup_str
 
 
-async def evaluate_html(generated_html: str, reference_html: str, reference_image: Optional[Image.Image] = None) -> float:
+async def evaluate_html(generated_html: str, reference_html: str, reference_image: Optional[Image.Image] = None) -> dict[str, float]:
     """
     Evaluate generated HTML against reference HTML/image.
 
@@ -676,7 +725,13 @@ async def evaluate_html(generated_html: str, reference_html: str, reference_imag
         reference_image: Optional reference screenshot (PIL Image)
 
     Returns:
-        Evaluation score (0.0 to 1.0)
+        Dictionary with detailed scores:
+        - 'overall_score': Overall evaluation score (0.0 to 1.0)
+        - 'size_score': Size/area matching score
+        - 'text_score': Text similarity score
+        - 'position_score': Position similarity score
+        - 'color_score': Color similarity score
+        - 'clip_score': CLIP similarity score
     """
     try:
         # Pre-process HTML
@@ -704,7 +759,14 @@ async def evaluate_html(generated_html: str, reference_html: str, reference_imag
         if len(generated_blocks) == 0 or len(reference_blocks) == 0:
             logger.warning("No blocks extracted, using CLIP similarity only")
             clip_score = calculate_clip_similarity_with_blocks(generated_image, reference_image, [], [])
-            return 0.2 * clip_score
+            return {
+                'overall_score': float(0.2 * clip_score),
+                'size_score': 0.0,
+                'text_score': 0.0,
+                'position_score': 0.0,
+                'color_score': 0.0,
+                'clip_score': float(clip_score),
+            }
 
         # Merge blocks by bbox
         generated_blocks = merge_blocks_by_bbox(generated_blocks)
@@ -776,13 +838,35 @@ async def evaluate_html(generated_html: str, reference_html: str, reference_imag
             final_text_color_score = np.mean(text_color_scores)
             final_clip_score = calculate_clip_similarity_with_blocks(generated_image, reference_image, generated_blocks, reference_blocks)
             final_score = 0.2 * (final_size_score + final_matched_text_score + final_position_score + final_text_color_score + final_clip_score)
-            return float(final_score)
+
+            return {
+                'overall_score': float(final_score),
+                'size_score': float(final_size_score),
+                'text_score': float(final_matched_text_score),
+                'position_score': float(final_position_score),
+                'color_score': float(final_text_color_score),
+                'clip_score': float(final_clip_score),
+            }
         else:
             logger.warning("No matched blocks, using CLIP similarity only")
             final_clip_score = calculate_clip_similarity_with_blocks(generated_image, reference_image, generated_blocks, reference_blocks)
-            return 0.2 * final_clip_score
+            clip_only_score = 0.2 * final_clip_score
+            return {
+                'overall_score': float(clip_only_score),
+                'size_score': 0.0,
+                'text_score': 0.0,
+                'position_score': 0.0,
+                'color_score': 0.0,
+                'clip_score': float(final_clip_score),
+            }
 
     except Exception as e:
         logger.error(f"Evaluation error: {e}", exc_info=True)
-        # Return 0.0 for failed evaluations instead of fallback score
-        return 0.0
+        return {
+            'overall_score': 0.0,
+            'size_score': 0.0,
+            'text_score': 0.0,
+            'position_score': 0.0,
+            'color_score': 0.0,
+            'clip_score': 0.0,
+        }

@@ -183,22 +183,60 @@ class Design2CodeEvaluator(GreenAgent):
                 )
 
                 try:
-                    reward = await self._run_single_task(
+                    result = await self._run_single_task(
                         agent_url=agent_url,
                         task_data=task_data,
                         task_idx=task_idx,
                     )
-                    metrics["tasks"][str(task_idx)] = reward
+
+                    # Handle both old format (float) and new format (dict)
+                    if isinstance(result, dict):
+                        reward = result['score']
+                        detailed_scores = result.get('detailed_scores', {})
+                        metrics["tasks"][str(task_idx)] = {
+                            'score': reward,
+                            'detailed_scores': detailed_scores
+                        }
+                    else:
+                        # Backward compatibility
+                        reward = result
+                        metrics["tasks"][str(task_idx)] = reward
+
                     logger.info(f"Task {task_idx} completed with reward: {reward}")
                 except Exception as e:
                     logger.error(f"Task {task_idx} failed: {e}", exc_info=True)
-                    metrics["tasks"][str(task_idx)] = 0.0
+                    metrics["tasks"][str(task_idx)] = {
+                        'score': 0.0,
+                        'detailed_scores': {
+                            'overall_score': 0.0,
+                            'size_score': 0.0,
+                            'text_score': 0.0,
+                            'position_score': 0.0,
+                            'color_score': 0.0,
+                            'clip_score': 0.0,
+                        }
+                    }
 
             time_used = time.time() - start_time
-            total_reward = sum(metrics["tasks"].values())
+
+            # Calculate total and average scores (handle both old and new formats)
+            total_reward = 0.0
+            for task_result in metrics["tasks"].values():
+                if isinstance(task_result, dict):
+                    total_reward += task_result.get('score', 0.0)
+                else:
+                    total_reward += float(task_result)
+
             num_completed = len(metrics["tasks"])
             avg_reward = total_reward / num_completed if num_completed > 0 else 0.0
-            pass_rate = (sum(1 for r in metrics["tasks"].values() if r > 0.5) / num_completed * 100) if num_completed > 0 else 0
+
+            # Calculate pass rate (handle both formats)
+            pass_count = 0
+            for task_result in metrics["tasks"].values():
+                score = task_result.get('score', task_result) if isinstance(task_result, dict) else task_result
+                if float(score) > 0.5:
+                    pass_count += 1
+            pass_rate = (pass_count / num_completed * 100) if num_completed > 0 else 0
 
             result_data = {
                 "dataset_name": dataset_name,
@@ -212,7 +250,7 @@ class Design2CodeEvaluator(GreenAgent):
 
             # Format task results for display
             task_results_str = "\n".join(
-                f"  Task {task_id}: {'✅' if score > 0.7 else '⚠️' if score > 0.5 else '❌'} ({score:.3f})"
+                f"  Task {task_id}: {'✅' if (score.get('score', score) if isinstance(score, dict) else score) > 0.7 else '⚠️' if (score.get('score', score) if isinstance(score, dict) else score) > 0.5 else '❌'} ({(score.get('score', score) if isinstance(score, dict) else score):.3f})"
                 for task_id, score in sorted(metrics["tasks"].items(), key=lambda x: int(x[0]))
             )
 
@@ -242,8 +280,8 @@ Task Results:
         agent_url: str,
         task_data: dict,
         task_idx: int,
-    ) -> float:
-        """Run a single Design2Code task and return the reward."""
+    ) -> dict[str, Any]:
+        """Run a single Design2Code task and return the reward with detailed scores."""
         try:
             # Log dataset structure for debugging
             if task_idx == 0:  # Only log for first task to avoid spam
@@ -258,7 +296,17 @@ Task Results:
             screenshot = task_data.get("image") or task_data.get("screenshot")
             if screenshot is None:
                 logger.warning(f"Task {task_idx} has no screenshot/image")
-                return 0.0
+                return {
+                    'score': 0.0,
+                    'detailed_scores': {
+                        'overall_score': 0.0,
+                        'size_score': 0.0,
+                        'text_score': 0.0,
+                        'position_score': 0.0,
+                        'color_score': 0.0,
+                        'clip_score': 0.0,
+                    }
+                }
 
             # Ensure it's a PIL Image
             if not isinstance(screenshot, Image.Image):
@@ -271,7 +319,17 @@ Task Results:
                         screenshot = screenshot.convert('RGB')
                     else:
                         logger.warning(f"Task {task_idx}: Could not convert screenshot to PIL Image")
-                        return 0.0
+                        return {
+                            'score': 0.0,
+                            'detailed_scores': {
+                                'overall_score': 0.0,
+                                'size_score': 0.0,
+                                'text_score': 0.0,
+                                'position_score': 0.0,
+                                'color_score': 0.0,
+                                'clip_score': 0.0,
+                            }
+                        }
 
             # Convert to RGB if needed
             if screenshot.mode != 'RGB':
@@ -322,7 +380,17 @@ Task Results:
                         continue
                     else:
                         logger.error(f"Task {task_idx}: LLM refused after {max_retries} attempts")
-                        return 0.0
+                        return {
+                            'score': 0.0,
+                            'detailed_scores': {
+                                'overall_score': 0.0,
+                                'size_score': 0.0,
+                                'text_score': 0.0,
+                                'position_score': 0.0,
+                                'color_score': 0.0,
+                                'clip_score': 0.0,
+                            }
+                        }
 
                 # Extract HTML from response
                 generated_html = extract_html_from_response(response)
@@ -339,16 +407,32 @@ Task Results:
 
             if not generated_html or len(generated_html.strip()) == 0:
                 logger.warning(f"Task {task_idx}: No HTML extracted from response after {max_retries} attempts")
-                return 0.0
+                return {
+                    'score': 0.0,
+                    'detailed_scores': {
+                        'overall_score': 0.0,
+                        'size_score': 0.0,
+                        'text_score': 0.0,
+                        'position_score': 0.0,
+                        'color_score': 0.0,
+                        'clip_score': 0.0,
+                    }
+                }
 
             # Evaluate HTML using visual evaluator
-            score = await evaluate_html(
+            detailed_scores = await evaluate_html(
                 generated_html=generated_html,
                 reference_html=reference_html,
                 reference_image=screenshot,
             )
 
-            return float(score)
+            # Extract overall score for backward compatibility
+            score = detailed_scores.get('overall_score', 0.0)
+
+            return {
+                'score': float(score),
+                'detailed_scores': detailed_scores
+            }
 
         except Exception as e:
             logger.error(f"Error running task {task_idx}: {e}", exc_info=True)
