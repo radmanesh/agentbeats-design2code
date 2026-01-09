@@ -10,7 +10,7 @@ COPY src src
 
 RUN \
     --mount=type=cache,target=/home/agentbeats/.cache/uv,uid=1000 \
-    uv sync --locked
+    uv sync --locked --no-group dev
 
 # Install system dependencies
 USER root
