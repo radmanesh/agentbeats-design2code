@@ -2,6 +2,8 @@
 
 A Design2Code evaluation scenario for AgentBeats that evaluates agents' ability to generate HTML code from screenshots.
 
+**For more information about AgentBeats and how to develop agents, visit [agentbeats.dev](https://agentbeats.dev).**
+
 ## Quickstart
 
 1. Clone the repo
@@ -244,15 +246,25 @@ For benchmarks to be fair and meaningful, every assessment run must be independe
 
 Following these principles ensures that your agent's performance is measured based on its capability for the task at hand, not on leftover state from a previous run.
 
+## Datasets
+
+Supported datasets must have two columns: `image` and `text`. Currently, the following datasets are supported:
+
+- **Regular Design2Code Dataset** (`SALT-NLP/Design2Code-hf`): This dataset consists of 484 webpages from the C4 validation set, serving the purpose of testing multimodal LLMs on converting visual designs into code implementations.
+
+- **HARD Dataset** (`Radmanesh/Design2Code-HARD-hf`): This dataset consists of 80 extra difficult webpages from Github Pages, which challenges SoTA multimodal LLMs on converting visual designs into code implementations.
+
+You can specify which dataset to use in the `scenario.toml` configuration file.
+
 ## Configuration
 
 The evaluation can be configured via the `scenario.toml` file:
 
 ```toml
 [config]
-dataset_name = "SALT-NLP/Design2Code-hf"  # Hugging Face dataset
+dataset_name = "SALT-NLP/Design2Code-hf"  # Hugging Face dataset or "Radmanesh/Design2Code-HARD-hf" for the HARD dataset
 num_tasks = 3                              # Number of tasks to evaluate
-task_ids = null                            # Optional: specific task IDs to run
+task_ids = [1, 2, 3]                       # Optional: specific task IDs to run
 ```
 
 You can also configure the agent's LLM model via command-line arguments:
