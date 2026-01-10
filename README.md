@@ -16,7 +16,7 @@ cd agentbeats-design2code
 
 2. Install dependencies
 ```bash
-uv sync --extra dev
+uv sync
 ```
 
 3. Set environment variables
