@@ -18,6 +18,21 @@ dependencies = [
     "httpx>=0.25.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "beautifulsoup4>=4.14.3",
+    "colormath>=3.0.0",
+    "datasets>=4.4.2",
+    "numpy>=2.4.1",
+    "opencv-python-headless>=4.11.0.86",
+    "pillow>=12.1.0",
+    "playwright>=1.57.0",
+    "scipy>=1.16.3",
+    "torch>=2.9.1",
+    "torchvision>=0.24.1",
+    "clip @ git+https://github.com/openai/CLIP.git",
+]
+
 [project.scripts]
 agentbeats-run = "agentbeats.run_scenario:main"
 

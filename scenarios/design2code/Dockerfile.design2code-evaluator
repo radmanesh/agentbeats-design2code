@@ -10,7 +10,7 @@ COPY src src
 
 RUN \
     --mount=type=cache,target=/home/agentbeats/.cache/uv,uid=1000 \
-    uv sync --locked
+    uv sync --locked --extra dev
 
 # Install system dependencies
 USER root
@@ -19,15 +19,15 @@ RUN apt-get update && apt-get install -y git && \
 USER agentbeats
 
 # Install evaluation dependencies
-RUN \
-    --mount=type=cache,target=/home/agentbeats/.cache/uv,uid=1000 \
-    uv pip install --no-cache-dir datasets pillow opencv-python-headless numpy beautifulsoup4 colormath scipy playwright && \
-    uv pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# RUN \
+#     --mount=type=cache,target=/home/agentbeats/.cache/uv,uid=1000 \
+#     uv pip install --no-cache-dir datasets pillow opencv-python-headless numpy beautifulsoup4 colormath scipy playwright && \
+#     uv pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
-# Install CLIP from GitHub (not on PyPI)
-RUN \
-    --mount=type=cache,target=/home/agentbeats/.cache/uv,uid=1000 \
-    uv pip install --no-cache-dir "git+https://github.com/openai/CLIP.git"
+# # Install CLIP from GitHub (not on PyPI)
+# RUN \
+#     --mount=type=cache,target=/home/agentbeats/.cache/uv,uid=1000 \
+#     uv pip install --no-cache-dir "git+https://github.com/openai/CLIP.git"
 
 # Install Playwright browsers
 RUN uv run playwright install chromium

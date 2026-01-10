@@ -1,7 +1,7 @@
 """
-Design2Code Agent - White agent that generates HTML from screenshots.
+Design2Code Agent - Purple agent that generates HTML from screenshots.
 
-This is the agent being tested. It:
+This is the purple agent being tested. It:
 1. Receives screenshot images and task instructions
 2. Uses GPT-4o Vision to generate HTML code that recreates the visual appearance
 3. Returns HTML wrapped in <html_code>...</html_code> tags
