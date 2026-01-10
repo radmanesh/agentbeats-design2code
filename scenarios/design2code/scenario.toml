@@ -9,4 +9,4 @@ cmd = "python scenarios/design2code/design2code_agent.py --host 127.0.0.1 --port
 
 [config]
 dataset_name = "SALT-NLP/Design2Code-hf"
-num_tasks = 3
+num_tasks = 5
