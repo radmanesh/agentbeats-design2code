@@ -35,17 +35,6 @@ RUN uv run playwright install chromium
 # Install Playwright system dependencies (must run as root)
 USER root
 RUN uv run playwright install-deps chromium
-# Clean up
-# RUN rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* && \
-#     apt-get remove -y git && \
-#     apt-get autoremove -y && \
-#     apt-get clean && \
-#     # Remove documentation
-#     rm -rf /usr/local/share/doc /usr/local/share/man && \
-#     # Clean up apt cache and temp files
-#     find /usr/local -name "*.pyc" -delete && \
-#     find /usr/local -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true && \
-#     find /usr/local -name "*.dist-info" -type d -exec rm -rf {} + 2>/dev/null || true
 USER agentbeats
 
 COPY scenarios scenarios

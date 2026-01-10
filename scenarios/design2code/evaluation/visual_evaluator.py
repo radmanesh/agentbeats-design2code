@@ -49,7 +49,7 @@ def _get_clip_model():
             logger.debug("Torch imported successfully")
             try:
                 import clip
-                logger.info("CLIP library imported successfully")
+                logger.debug("CLIP library imported successfully")
             except ImportError as e:
                 logger.error(f"CLIP library import failed: {e}")
                 logger.warning("CLIP library not installed. Install with: pip install git+https://github.com/openai/CLIP.git")
@@ -57,7 +57,7 @@ def _get_clip_model():
                 return None, None, None
 
             _clip_device = "cuda" if torch.cuda.is_available() else "cpu"
-            logger.info(f"Loading CLIP model 'ViT-B/32' on {_clip_device}...")
+            logger.debug(f"Loading CLIP model 'ViT-B/32' on {_clip_device}...")
 
             # Try to load CLIP model, handling SSL certificate issues
             try:
@@ -65,7 +65,6 @@ def _get_clip_model():
             except (urllib.error.URLError, ssl.SSLError) as ssl_error:
                 if "CERTIFICATE_VERIFY_FAILED" in str(ssl_error) or isinstance(ssl_error, ssl.SSLError):
                     logger.warning(f"SSL certificate verification failed. Retrying with SSL verification disabled...")
-                    logger.warning("WARNING: SSL verification is disabled for CLIP model download. This is insecure but may be necessary behind corporate proxies.")
 
                     # Create unverified SSL context
                     ssl_context = ssl.create_default_context()
@@ -82,7 +81,7 @@ def _get_clip_model():
                     urllib.request.urlopen = urlopen_with_ssl_bypass
                     try:
                         _clip_model, _clip_preprocess = clip.load("ViT-B/32", device=_clip_device)
-                        logger.info("CLIP model loaded successfully with SSL verification disabled")
+                        logger.debug("CLIP model loaded successfully with SSL verification disabled")
                     finally:
                         # Restore original urlopen
                         urllib.request.urlopen = original_urlopen
@@ -90,7 +89,7 @@ def _get_clip_model():
                     raise
 
             _clip_model.eval()  # Set to evaluation mode
-            logger.info(f"CLIP model loaded successfully on {_clip_device}")
+            logger.debug(f"CLIP model loaded successfully on {_clip_device}")
         except Exception as e:
             logger.error(f"CLIP model loading failed: {e}", exc_info=True)
             logger.warning(f"CLIP not available: {e}. CLIP similarity will return 0.0")
@@ -339,7 +338,6 @@ def extract_blocks_from_html(html_content: str, image_width: int = 1920, image_h
                     if len(blocks) >= 50:  # Limit
                         break
 
-    logger.info(f"extract_blocks_from_html: Extracted {len(blocks)} blocks from HTML")
     if len(blocks) == 0:
         logger.warning(f"extract_blocks_from_html: No blocks extracted. HTML length: {len(html_content)}, HTML preview: {html_content[:200]}")
 
@@ -674,7 +672,6 @@ def calculate_clip_similarity_with_blocks(image1: Image.Image, image2: Image.Ima
         image_features2 /= image_features2.norm(dim=-1, keepdim=True)
 
         similarity = (image_features1 @ image_features2.T).item()
-        logger.info(f"CLIP similarity calculated: {similarity:.4f}")
         return similarity
     except Exception as e:
         logger.error(f"CLIP similarity calculation failed: {e}", exc_info=True)
