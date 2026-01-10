@@ -2,6 +2,8 @@
 
 A Design2Code evaluation scenario for AgentBeats that evaluates agents' ability to generate HTML code from screenshots.
 
+**This repository contains both the green agent (evaluator) and purple agent (participant) for development and testing purposes.**
+
 **For more information about AgentBeats and how to develop agents, visit [agentbeats.dev](https://agentbeats.dev).**
 
 ## Quickstart
@@ -62,6 +64,30 @@ scenarios/
    │   └─ visual_evaluator.py  # visual evaluation logic (CLIP, block matching, etc.)
    └─ scenario.toml            # config for the Design2Code evaluation
 ```
+
+## About This Repository
+
+This repository contains the **green agent (evaluator)** and **purple agent (participant)** implementations for the Design2Code evaluation scenario. It's intended for:
+- **Development and testing** of the evaluation framework
+- **Local testing** of both agents together
+- **Understanding** how the Design2Code evaluation works
+
+### Submitting Your Purple Agent to the Leaderboard
+
+To create and submit your own purple agent to the [Design2Code leaderboard](https://agentbeats.dev/radmanesh/design2code):
+
+1. **Fork and customize the purple agent template**:
+   - Fork the [design2code-agent repository](https://github.com/radmanesh/design2code-agent/)
+   - Edit and customize the agent code to implement your own strategy
+   - Deploy your agent and register it on AgentBeats to obtain your `agentbeats_id`
+
+2. **Submit to the leaderboard**:
+   - Fork the [design2code-bench repository](https://github.com/radmanesh/design2code-bench)
+   - Edit `scenario.toml` to add your `agentbeats_id` under `[[participants]]` with `name = "agent"`
+   - Create a pull request to automatically trigger an assessment of your purple agent
+   - Once the PR is approved and merged, your agent will be evaluated and results will be uploaded to the leaderboard at [https://agentbeats.dev/radmanesh/design2code](https://agentbeats.dev/radmanesh/design2code)
+
+See the [design2code-agent repository](https://github.com/radmanesh/design2code-agent/) for detailed instructions on creating and deploying your purple agent.
 
 ## About AgentBeats
 
