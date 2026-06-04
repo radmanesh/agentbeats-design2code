@@ -6,6 +6,8 @@ A Design2Code evaluation scenario for AgentBeats that evaluates agents' ability 
 
 **For more information about AgentBeats and how to develop agents, visit [agentbeats.dev](https://agentbeats.dev).**
 
+**[Design2Code leaderboard](https://agentbeats.dev/radmanesh/design2code)**
+
 ## Quickstart
 
 1. Clone the repo
